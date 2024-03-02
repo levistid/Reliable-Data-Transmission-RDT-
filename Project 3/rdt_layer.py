@@ -55,6 +55,7 @@ class RDTLayer(object):
 
         # Window, sequence, acknowledge, data received
         self.dataReceived = ''
+        self.dataLength = 0
         self.lastAck = 0
         self.currentSeq = 0
         self.currentAck = 0
@@ -65,7 +66,7 @@ class RDTLayer(object):
         self.countSegmentTimeout = 0
         self.unkAckPacketSent = {}
         self.unAckPacketRcvd = []
-        self.TimeoutIteration = 0   #counts timeouts
+        self.timeoutIteration = 0   #counts timeouts
         self.outofOrderPacket = 0   # number of packets out of order
         self.droppedAckPackets = 0
 
@@ -118,7 +119,7 @@ class RDTLayer(object):
         print('getDataReceived(): Complete this...')
 
         # ############################################################################################################ #
-        return ""
+        return self.dataReceived
 
     # ################################################################################################################ #
     # processData()                                                                                                    #
@@ -146,6 +147,27 @@ class RDTLayer(object):
 
         # ############################################################################################################ #
         print('processSend(): Complete this...')
+
+        received = self.receiveChannel.receiveQueue
+
+        if self.currentIteration == self.timeoutIteration:
+            self.countSegmentTimeout += 1
+            for key in self.unkAckPacketSent:
+                segmentSend= self.unkAckPacketSent[key]
+                print("processSend():", segmentSend.to_string())
+
+        if self.currentAck > self.lastAck:
+            self.currentAck = self.lastAck - 1
+            self.availableWindow = self.FLOW_CONTROL_WIN_SIZE
+
+        while self.availableWindow > 0:
+
+            #Check if full data is used
+            if self.availableWindow > self.DATA_LENGTH:
+                # if current ack has not reached the end of data to send
+                if self.currentAck < (self.dataLength - 1):
+                    segmentSend = Segment()
+
 
         # You should pipeline segments to fit the flow-control window
         # The flow-control window is the constant RDTLayer.FLOW_CONTROL_WIN_SIZE
