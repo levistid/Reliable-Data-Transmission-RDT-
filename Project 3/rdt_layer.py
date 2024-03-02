@@ -46,7 +46,29 @@ class RDTLayer(object):
         self.receiveChannel = None
         self.dataToSend = ''
         self.currentIteration = 0
+        self.inputIndex = -1
+        self.availableWindow = 15   # window size
         # Add items as needed
+
+        # Segment list
+        self.segmentList = ''       # so segment list isn't recreated multiple times
+
+        # Window, sequence, acknowledge, data received
+        self.dataReceived = ''
+        self.lastAck = 0
+        self.currentSeq = 0
+        self.currentAck = 0
+        self.charsrcvd = 0
+
+        # Out of Order, Acknowledge error, checksum error, wait, timeout, drops etc
+        self.wait = 0
+        self.countSegmentTimeout = 0
+        self.unkAckPacketSent = {}
+        self.unAckPacketRcvd = []
+        self.TimeoutIteration = 0   #counts timeouts
+        self.outofOrderPacket = 0   # number of packets out of order
+        self.droppedAckPackets = 0
+
 
     # ################################################################################################################ #
     # setSendChannel()                                                                                                 #
