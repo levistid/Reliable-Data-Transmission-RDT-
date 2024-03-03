@@ -1,3 +1,5 @@
+import copy
+
 from segment import Segment
 
 
@@ -54,21 +56,14 @@ class RDTLayer(object):
         self.segmentList = ''       # so segment list isn't recreated multiple times
 
         # Window, sequence, acknowledge, data received
-        self.dataReceived = ''
-        self.dataLength = 0
+        self.received = []
         self.lastAck = 0
-        self.currentSeq = 0
-        self.currentAck = 0
-        self.charsrcvd = 0
+        self.base = 0
+        self.pipelineSeg= 0
+        self.buffer = {}   # time out for segments
+        self.timeoutIteration = 0
+        self.dataReceived = ''
 
-        # Out of Order, Acknowledge error, checksum error, wait, timeout, drops etc
-        self.wait = 0
-        self.countSegmentTimeout = 0
-        self.unkAckPacketSent = {}
-        self.unAckPacketRcvd = []
-        self.timeoutIteration = 0   #counts timeouts
-        self.outofOrderPacket = 0   # number of packets out of order
-        self.droppedAckPackets = 0
 
 
     # ################################################################################################################ #
@@ -143,7 +138,15 @@ class RDTLayer(object):
     #                                                                                                                  #
     # ################################################################################################################ #
     def processSend(self):
-        segmentSend = Segment()
+
+        #no data, then skip
+        if self.dataToSend == '':
+            return
+
+
+        if self.base == self.lastAck:
+            while self.pipelineSeg < 3:
+                segmentSend = Segment()
 
         # ############################################################################################################ #
         print('processSend(): Complete this...')
@@ -162,11 +165,45 @@ class RDTLayer(object):
 
         while self.availableWindow > 0:
 
-            #Check if full data is used
+            # Check if full data is sent
             if self.availableWindow > self.DATA_LENGTH:
                 # if current ack has not reached the end of data to send
                 if self.currentAck < (self.dataLength - 1):
-                    segmentSend = Segment()
+                    self.currentAck += 1
+                    seqnum = self.currentAck
+                    data = self.setDataToSend[self.currentAck:self.currentAck+self.DATA_LENGTH]
+
+                    # Sending Segment
+                    segmentSend.setData(seqnum,data)
+                    print("Sending Segment:", segmentSend.to_string())
+                    self.availableWindow = self.availableWindow - len(segmentSend.payload)
+
+                    # use unreliable send channel to send segment
+                    self.sendChannel.send(segmentSend)
+                    self.unkAckPacketSent[segmentSend.seqnum] = segmentSend
+
+                    # update data variables
+                    self.currentAck = self.currentAck + (self.DATA_LENGTH + 1)
+
+            # Send partial data
+
+            if self. currentAck < (self.dataLength - 1):
+                segmentSend = Segment()
+                self.currentAck += 1
+                seqnum = self.currentAck
+                data = self.setDataToSend[self.currentAck:self.currentAck + self.availableWindow]
+                # Display
+                segmentSend.setData(seqnum, data)
+                print("Sending Segment:", segmentSend.to_string())
+                self.availableWindow = self.availableWindow - len(segmentSend.payload)
+                # unreliable send channel
+                self.sendChannel.send(segmentSend)
+                self.unkAckPacketSent[segmentSend.seqnum] = segmentSend
+                # Update variables
+                self.currentAck = self.currentAck + (len(segmentSend.payload)-1)
+
+            # timeout
+            self.timeoutIteration = self.currentIteration + self.maxTime
 
 
         # You should pipeline segments to fit the flow-control window
@@ -179,14 +216,17 @@ class RDTLayer(object):
         # The seqnum is the sequence number for the segment (in character number, not bytes)
 
 
-        seqnum = "0"
-        data = "x"
+
 
 
         # ############################################################################################################ #
         # Display sending segment
         segmentSend.setData(seqnum,data)
         print("Sending segment: ", segmentSend.to_string())
+        self.sendChannel += 4
+        self.buffer[seqnum] = 0
+        segmentCopy = copy.deepcopy(segmentSend)
+        self.sendChannel.send(segmentCopy)
 
         # Use the unreliable sendChannel to send the segment
         self.sendChannel.send(segmentSend)
@@ -200,8 +240,6 @@ class RDTLayer(object):
     #                                                                                                                  #
     # ################################################################################################################ #
     def processReceiveAndSendRespond(self):
-        segmentAck = Segment()                  # Segment acknowledging packet(s) received
-
         # This call returns a list of incoming segments (see Segment class)...
         listIncomingSegments = self.receiveChannel.receive()
 
@@ -209,27 +247,81 @@ class RDTLayer(object):
         # What segments have been received?
         # How will you get them back in order?
         # This is where a majority of your logic will be implemented
-        print('processReceive(): Complete this...')
+        print('processReceive():')
+        # Client side
+        if self.dataToSend != '':
+            #sort received packets
+            listIncomingSegments.sort(key=lambda x:x.acknum)
+            acknum = -1
+            # Check that acks are execpted and in correct order
+            for pkt in listIncomingSegments:
+                if pkt.acknum == self.lastAck + 4 and self.lastAck not in self.received:
+                    self.pipelineSeg -= 1
+                    self.received.append(self.lastAck)
+                    self.buffer.pop(self.lastAck)
+                    self.lastAck += 4
+                else:
+                    acknum = pkt.acknum
+
+            # check segment timeouts, if timed out, send packet
+            for seqnum, count in self.buffer.items():
+                if self.currentIteration - count > 4 and acknum == 1:
+                    self.timeoutIteration += 1
+                    acknum = seqnum
+                self.buffer[seqnum] += 1
 
 
+            # Send packets
+            if acknum != 1:
+                for seq in range(acknum,acknum +9, 4):
+                    data = self.dataToSend[seq:seq + self.DATA_LENGTH]
+                    segmentSend = Segment()
+                    # Print sending seg
+                    segmentSend.setData(seq,data)
+                    print("Sending segment: ", segmentSend.to_string())
 
+                    self.sendChannel.send(segmentSend)  # use unreliable send channel
+        #Server side
+        else:
+            if listIncomingSegments:
+                #sort received packets
+                listIncomingSegments.sort(key=lambda x: x.seqnum)
+                for packet in listIncomingSegments:
+                    segmentAck = Segment()
 
+                    #check if packet is already in data received, check the checksum for each packet
+                    if packet.seqnum < len(self.dataReceived):
+                        continue
+                    if not packet.checkChecksum():
+                        continue
 
+                    else:
+                        if packet.seqnum == self.lastAck :
+                            print('processReceive(): Complete this...')
+                            print('Received segment:', packet.payload)
+                            self.lastAck += 4
+                            acknum = self.lastAck
+                            # add data received
+                            self.dataReceived += packet.payload
+                        else:
+                            acknum = self.lastAck
+                    segmentAck.setAck(acknum)
+                    print('Sending Ack: ', segmentAck.to_string())
+                    self.sendChannel.send(segmentAck)
 
         # ############################################################################################################ #
         # How do you respond to what you have received?
         # How can you tell data segments apart from ack segemnts?
-        print('processReceive(): Complete this...')
 
         # Somewhere in here you will be setting the contents of the ack segments to send.
         # The goal is to employ cumulative ack, just like TCP does...
-        acknum = "0"
+
 
 
         # ############################################################################################################ #
         # Display response segment
-        segmentAck.setAck(acknum)
-        print("Sending ack: ", segmentAck.to_string())
+  #  segmentAck.setAck(acknum)
+    #print("Sending ack: ", segmentAck.to_string())
 
         # Use the unreliable sendChannel to send the ack packet
-        self.sendChannel.send(segmentAck)
+    #self.sendChannel.send(segmentAck)
