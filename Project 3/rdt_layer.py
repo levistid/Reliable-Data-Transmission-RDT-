@@ -63,6 +63,11 @@ class RDTLayer(object):
         self.buffer = {}   # time out for segments
         self.timeoutIteration = 0
         self.dataReceived = ''
+        self.unkAckPacketSent = {}
+        self.unAckPacketRcvd = []
+        self.charRvcd = 0
+        self.currentAck = 0
+        self.dataLength = 0
 
 
 
@@ -154,7 +159,7 @@ class RDTLayer(object):
         received = self.receiveChannel.receiveQueue
 
         if self.currentIteration == self.timeoutIteration:
-            self.countSegmentTimeout += 1
+            self.timeoutIteration += 1
             for key in self.unkAckPacketSent:
                 segmentSend= self.unkAckPacketSent[key]
                 print("processSend():", segmentSend.to_string())
