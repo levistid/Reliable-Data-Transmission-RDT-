@@ -58,13 +58,11 @@ class RDTLayer(object):
         # Window, sequence, acknowledge, data received
         self.received = []
         self.lastAck = 0
-        self.base = 0
+        self.sendBase = 0
         self.pipelineSeg= 0
         self.buffer = {}   # time out for segments
         self.timeoutIteration = 0
         self.dataReceived = ''
-        self.unkAckPacketSent = {}
-        self.unAckPacketRcvd = []
         self.charRvcd = 0
         self.currentAck = 0
         self.dataLength = 0
@@ -145,70 +143,20 @@ class RDTLayer(object):
     def processSend(self):
 
         #no data, then skip
-        if self.dataToSend == '':
+        if not self.dataToSend:
             return
 
-
-        if self.base == self.lastAck:
+        if self.sendBase == self.lastAck:
             while self.pipelineSeg < 3:
                 segmentSend = Segment()
+                seqnum = self.sendBase
+                data = self.dataToSend[seqnum:seqnum + self.DATA_LENGTH]
 
         # ############################################################################################################ #
         print('processSend(): Complete this...')
 
-        received = self.receiveChannel.receiveQueue
 
-        if self.currentIteration == self.timeoutIteration:
-            self.timeoutIteration += 1
-            for key in self.unkAckPacketSent:
-                segmentSend= self.unkAckPacketSent[key]
-                print("processSend():", segmentSend.to_string())
 
-        if self.currentAck > self.lastAck:
-            self.currentAck = self.lastAck - 1
-            self.availableWindow = self.FLOW_CONTROL_WIN_SIZE
-
-        while self.availableWindow > 0:
-
-            # Check if full data is sent
-            if self.availableWindow > self.DATA_LENGTH:
-                # if current ack has not reached the end of data to send
-                if self.currentAck < (self.dataLength - 1):
-                    self.currentAck += 1
-                    seqnum = self.currentAck
-                    data = self.setDataToSend[self.currentAck:self.currentAck+self.DATA_LENGTH]
-
-                    # Sending Segment
-                    segmentSend.setData(seqnum,data)
-                    print("Sending Segment:", segmentSend.to_string())
-                    self.availableWindow = self.availableWindow - len(segmentSend.payload)
-
-                    # use unreliable send channel to send segment
-                    self.sendChannel.send(segmentSend)
-                    self.unkAckPacketSent[segmentSend.seqnum] = segmentSend
-
-                    # update data variables
-                    self.currentAck = self.currentAck + (self.DATA_LENGTH + 1)
-
-            # Send partial data
-
-            if self. currentAck < (self.dataLength - 1):
-                segmentSend = Segment()
-                self.currentAck += 1
-                seqnum = self.currentAck
-                data = self.setDataToSend[self.currentAck:self.currentAck + self.availableWindow]
-                # Display
-                segmentSend.setData(seqnum, data)
-                print("Sending Segment:", segmentSend.to_string())
-                self.availableWindow = self.availableWindow - len(segmentSend.payload)
-                # unreliable send channel
-                self.sendChannel.send(segmentSend)
-                self.unkAckPacketSent[segmentSend.seqnum] = segmentSend
-                # Update variables
-                self.currentAck = self.currentAck + (len(segmentSend.payload)-1)
-
-            # timeout
-            self.timeoutIteration = self.currentIteration + self.maxTime
 
 
         # You should pipeline segments to fit the flow-control window
@@ -226,12 +174,12 @@ class RDTLayer(object):
 
         # ############################################################################################################ #
         # Display sending segment
-        segmentSend.setData(seqnum,data)
         print("Sending segment: ", segmentSend.to_string())
-        self.sendChannel += 4
+        self.sendBase += 4
         self.buffer[seqnum] = 0
         segmentCopy = copy.deepcopy(segmentSend)
         self.sendChannel.send(segmentCopy)
+        self.pipelineSeg += 1
 
         # Use the unreliable sendChannel to send the segment
         self.sendChannel.send(segmentSend)
