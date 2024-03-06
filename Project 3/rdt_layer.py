@@ -34,7 +34,13 @@ class RDTLayer(object):
     dataToSend = ''
     currentIteration = 0                                # Use this for segment 'timeouts'
     # Add items as needed
-
+    currentWindow = [0,4]
+    currentSeqNum = 0
+    dataArr = []
+    unAckIteration = 0
+    expectAct = 4
+    dataRcvd = ''
+    lastAck = 0
     # ################################################################################################################ #
     # __init__()                                                                                                       #
     #                                                                                                                  #
@@ -48,24 +54,15 @@ class RDTLayer(object):
         self.receiveChannel = None
         self.dataToSend = ''
         self.currentIteration = 0
-        self.inputIndex = -1
-        self.availableWindow = 15   # window size
         # Add items as needed
-
-        # Segment list
-        self.segmentList = ''       # so segment list isn't recreated multiple times
-
-        # Window, sequence, acknowledge, data received
-        self.received = []
-        self.lastAck = 0
-        self.sendBase = 0
-        self.pipelineSeg= 0
-        self.buffer = {}   # time out for segments
-        self.timeoutIteration = 0
-        self.dataReceived = ''
-        self.charRvcd = 0
         self.currentAck = 0
-        self.dataLength = 0
+        self.windowStart = 0
+        self.windowEnd = 4
+        self.setRole = "Server"
+        self.waitTime = 0
+        self.dataRcvd = ''
+        self.timeoutNum = 0
+        self.lastAck = 0
 
 
 
@@ -115,9 +112,11 @@ class RDTLayer(object):
         # Identify the data that has been received...
 
         print('getDataReceived(): Complete this...')
-
+        data = sorted(self.dataArr)
+        for i in range(len(data)):
+            data += data[i][i]
         # ############################################################################################################ #
-        return self.dataReceived
+        return data
 
     # ################################################################################################################ #
     # processData()                                                                                                    #
@@ -141,24 +140,35 @@ class RDTLayer(object):
     #                                                                                                                  #
     # ################################################################################################################ #
     def processSend(self):
-
+        segmentSend = Segment()
         #no data, then skip
         if not self.dataToSend:
             return
+        elif self.dataToSend != '':
+            seqnum = len(self.dataToSend)
+        else:
+            seqnum = 0
 
-        if self.sendBase == self.lastAck:
-            while self.pipelineSeg < 3:
-                segmentSend = Segment()
-                seqnum = self.sendBase
-                data = self.dataToSend[seqnum:seqnum + self.DATA_LENGTH]
+        data = self.dataToSend[seqnum:seqnum+self.DATA_LENGTH]
+        self.dataToSend = str(self.dataToSend + data)
 
         # ############################################################################################################ #
         print('processSend(): Complete this...')
+        #if self.dataToSend != "":
+            #self.setRole = "Client"
+        """
+        if self.currentIteration > 1 and len(self.receiveChannel.receive) == 0:
+             iteration without acknowledge means current window needs to be resent
+            if self.waitTime == 3:     # resend if timeout
+                self.currentSeqNum = self.currentWindow[0]
+                self.timeoutNum = += 1
+            else:
+                self.waitTime += 1
+                return
 
-
-
-
-
+        if self.setRole != "Server":
+            self.dataToSend(self.windowStart,self.windowEnd,seqnum, len(DATA_LENGTH))
+            """
         # You should pipeline segments to fit the flow-control window
         # The flow-control window is the constant RDTLayer.FLOW_CONTROL_WIN_SIZE
         # The maximum data that you can send in a segment is RDTLayer.DATA_LENGTH
@@ -174,12 +184,9 @@ class RDTLayer(object):
 
         # ############################################################################################################ #
         # Display sending segment
+        segmentSend.setData(seqnum,data)
         print("Sending segment: ", segmentSend.to_string())
-        self.sendBase += 4
-        self.buffer[seqnum] = 0
-        segmentCopy = copy.deepcopy(segmentSend)
-        self.sendChannel.send(segmentCopy)
-        self.pipelineSeg += 1
+
 
         # Use the unreliable sendChannel to send the segment
         self.sendChannel.send(segmentSend)
@@ -194,6 +201,8 @@ class RDTLayer(object):
     # ################################################################################################################ #
     def processReceiveAndSendRespond(self):
         # This call returns a list of incoming segments (see Segment class)...
+        segmentAck = Segment()
+        acknum = 0
         listIncomingSegments = self.receiveChannel.receive()
 
         # ############################################################################################################ #
@@ -201,7 +210,26 @@ class RDTLayer(object):
         # How will you get them back in order?
         # This is where a majority of your logic will be implemented
         print('processReceive():')
+        for segment in listIncomingSegments:
+            if segment.seqnum != -1:
+                if segment.seqnum > len(self.dataRcvd):
+                    acknum = self.lastAck
+                    break
+
+                for char in segment.payload:
+                    if str(char) == 'X':
+                        print("\n")
+
+                acknum = segment.seqnum
+                self.lastAck = acknum
+
+                if acknum == len(self.dataRcvd):
+                    self.dataRcvd = (self.dataRcvd + segment.payload)
+                elif acknum == 0 and self.dataRcvd == '':
+                    self.dataRcvd = (self.dataRcvd + segment.payload)
+
         # Client side
+        """
         if self.dataToSend != '':
             #sort received packets
             listIncomingSegments.sort(key=lambda x:x.acknum)
@@ -260,7 +288,7 @@ class RDTLayer(object):
                             acknum = self.lastAck
                     segmentAck.setAck(acknum)
                     print('Sending Ack: ', segmentAck.to_string())
-                    self.sendChannel.send(segmentAck)
+                    self.sendChannel.send(segmentAck) """
 
         # ############################################################################################################ #
         # How do you respond to what you have received?
@@ -273,8 +301,8 @@ class RDTLayer(object):
 
         # ############################################################################################################ #
         # Display response segment
-  #  segmentAck.setAck(acknum)
-    #print("Sending ack: ", segmentAck.to_string())
+        segmentAck.setAck(acknum)
+        print("Sending ack: ", segmentAck.to_string())
 
         # Use the unreliable sendChannel to send the ack packet
-    #self.sendChannel.send(segmentAck)
+        self.sendChannel.send(segmentAck)
